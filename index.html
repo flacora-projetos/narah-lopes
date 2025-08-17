@@ -1042,7 +1042,18 @@ const renderCalendar = ()=>{
         populateSelect('filter-status', statuses, true, 'Todos os Status');
         $('new-task-date').valueAsDate=new Date();
         try{
-          const cDoc=await getDoc(doc(db,'settings','clients')); if(cDoc.exists()) clients=cDoc.data().names||[]; else await setDoc(doc(db,'settings','clients'), { names:['Empresa Exemplo']});
+          const cDoc = await getDoc(doc(db,'settings','clients'));
+if (cDoc.exists()) {
+  const raw = cDoc.data() || {};
+  const list = Array.isArray(raw.list) ? raw.list : [];
+  const names = Array.isArray(raw.names) ? raw.names : [];
+
+  // clients (apenas nomes) para os selects iniciais
+  clients = (list.length ? list.map(x => x.name) : names) || [];
+} else {
+  await setDoc(doc(db,'settings','clients'), {});
+}
+;
           const oDoc=await getDoc(doc(db,'settings','owners')); if(oDoc.exists()) owners=oDoc.data().names||[]; else await setDoc(doc(db,'settings','owners'), { names:['Ana Silva']});
           populateSelect('new-task-client', clients, false, 'Selecione...'); populateSelect('filter-client', clients, false, 'Todos'); renderSettingsClients();
           populateSelect('new-task-owner', owners, false, 'Selecione...'); populateSelect('filter-owner', owners, false, 'Todos'); renderSettingsList('owner-list', owners, 'deleteOwner');
