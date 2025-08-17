@@ -1052,20 +1052,25 @@ const renderCalendar = ()=>{
           tasks = tasks.map((t,idx)=>{ try{ const dx = snap.docs[idx]?.data?.() || {}; return { ...t, recurrence:(dx.recurrence||t.recurrence||null), recurrenceType:(dx.recurrenceType||t.recurrenceType||''), recurrenceDays:(dx.recurrenceDays||t.recurrenceDays||[]), recurrenceUntil:(dx.recurrenceUntil||t.recurrenceUntil||'') }; }catch(e){ return t; } });
  renderTaskLog(); if(!$('content-calendar').classList.contains('hidden')) renderCalendar(); });
           
-          onSnapshot(doc(db,'settings','clients'), (ds)=>{
-            const raw = ds.data()||{};
-            let list = Array.isArray(raw.list) ? raw.list : [];
-            if ((!list || !list.length) && Array.isArray(raw.names)) {
-              list = raw.names.map(n=>({ name: String(n), tier: 'Mid Tier Account', owner:'' }));
-            }
-            const norm = ensureClientIds(list);
-            if(norm.changed){
-              setDoc(doc(db,'settings','clients'), { list: norm.list }, { merge:true }).catch(()=>{});
-            }
-            window.clientsFull = norm.list;
-            refreshClientSelects();
-            renderClientsTable();
-          });
+      onSnapshot(collection(db, 'clients'), (snapshot) => {
+  const list = [];
+  snapshot.forEach(docSnap => {
+    const data = docSnap.data();
+    if (data && data.name) {
+      list.push({
+        id: docSnap.id,
+        name: data.name,
+        tier: data.tier || 'Mid Tier Account',
+        owner: data.owner || ''
+      });
+    }
+  });
+  window.clientsFull = list;
+  refreshClientSelects();
+  renderClientsTable();
+});
+
+
           onSnapshot(doc(db,'settings','owners'), (ds)=>{ owners=ds.data()?.names||[]; populateSelect('new-task-owner', owners, false, 'Selecione...'); populateSelect('filter-owner', owners, false, 'Todos'); renderSettingsList('owner-list', owners, 'deleteOwner'); });
 
           setupControls(); $('loading-overlay').style.display='none';
