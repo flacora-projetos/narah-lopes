@@ -1034,7 +1034,47 @@ const renderCalendar = ()=>{
       window.deleteClient = async(name)=>{ if(confirm(`Remover cliente "${name}"?`)) await updateSettings('clients', clients.filter(c=>c!==name)); };
       window.deleteOwner = async(name)=>{ if(confirm(`Remover \"${name}\" da equipe?`)) await updateSettings('owners', owners.filter(o=>o!==name)); };
 
-      document.getElementById('add-client-form').addEventListener('submit', async(e)=>{ e.preventDefault(); const i=e.target['new-client-name']; const n=String(i.value).trim(); if(n && !clients.includes(n)){ await updateSettings('clients',[...clients,n]); i.value=''; }});
+      // ===================== ADIÇÃO DE CLIENTE (Nova forma) =====================
+(function wireAddClientForm(){
+  // IDs esperados (ajuste se o seu HTML usar outros):
+  // form:        #add-client-form
+  // nome:        #client-name
+  // selo/tier:   #client-tier   (valores: "Key Tier Account" / "Mid Tier Account" / "Low Tier Account" …)
+  // responsável: #clients-resp  (opcional — pode estar vazio)
+  const form = document.getElementById('add-client-form');
+  if (!form) return;
+
+  form.addEventListener('submit', async (e) => {
+    e.preventDefault();
+    const nameEl = document.getElementById('client-name');
+    const tierEl = document.getElementById('client-tier');
+    const respEl = document.getElementById('clients-resp');
+
+    const name = (nameEl?.value || '').trim();
+    const tier = (tierEl?.value || '').trim();
+    const owner = (respEl?.value || '').trim();
+
+    if (!name) {
+      alert('Informe o nome do cliente.');
+      return;
+    }
+
+    // cria um doc novo na coleção 'clients'
+    await addDoc(collection(db, 'clients'), {
+      name,
+      tier: tier || 'Mid Tier Account',
+      owner: owner || ''
+    });
+
+    // limpa campos
+    if (nameEl) nameEl.value = '';
+    if (tierEl) tierEl.value = 'Mid Tier Account';
+    if (respEl) respEl.value = '';
+
+    // a lista/selects atualizam sozinhos via onSnapshot
+  });
+})();
+
       document.getElementById('add-owner-form').addEventListener('submit', async(e)=>{ e.preventDefault(); const i=e.target['new-owner-name']; const n=String(i.value).trim(); if(n && !owners.includes(n)){ await updateSettings('owners',[...owners,n]); i.value=''; }});
 
       document.addEventListener('DOMContentLoaded', async()=>{
@@ -1042,17 +1082,100 @@ const renderCalendar = ()=>{
         populateSelect('filter-status', statuses, true, 'Todos os Status');
         $('new-task-date').valueAsDate=new Date();
         try{
-          const cDoc = await getDoc(doc(db,'settings','clients'));
-if (cDoc.exists()) {
-  const raw = cDoc.data() || {};
-  const list = Array.isArray(raw.list) ? raw.list : [];
-  const names = Array.isArray(raw.names) ? raw.names : [];
+          // ===================== CLIENTES & RESPONSÁVEIS (NOVA FONTE) =====================
+// Clientes vêm da coleção 'clients' (cada doc = { name, tier, owner })
+let clients = [];           // nomes de clientes para selects
+let clientsFull = [];       // lista completa (id, name, tier, owner) para UI “Clientes”
+let owners = [];            // nomes (string) vindos de 'owners' (cada doc = {name})
 
-  // clients (apenas nomes) para os selects iniciais
-  clients = (list.length ? list.map(x => x.name) : names) || [];
-} else {
-  await setDoc(doc(db,'settings','clients'), {});
+function populateSelect(selId, list, includeTodos = false, todosLabel = 'Todos') {
+  const el = document.getElementById(selId) || document.querySelector(`#${selId}`);
+  if (!el) return;
+  const current = el.value;
+  el.innerHTML = '';
+  if (includeTodos) {
+    const opt = document.createElement('option');
+    opt.value = '';
+    opt.textContent = todosLabel;
+    el.appendChild(opt);
+  }
+  list.forEach(n => {
+    const opt = document.createElement('option');
+    opt.value = n;
+    opt.textContent = n;
+    el.appendChild(opt);
+  });
+  // tenta manter o valor
+  const has = Array.from(el.options).some(o => o.value === current);
+  if (has) el.value = current;
 }
+
+function renderClientsTable() {
+  // Se existir a sua tabela/lista de clientes, redesenhe aqui.
+  // Exemplo simples: cria uma UL dentro de #clients-list (ajuste se seu HTML usa outra estrutura).
+  const box = document.getElementById('clients-list');
+  if (!box) return;
+  box.innerHTML = '';
+  const ul = document.createElement('ul');
+  ul.style.margin = '0';
+  ul.style.padding = '0';
+  clientsFull.forEach(c => {
+    const li = document.createElement('li');
+    li.style.listStyle = 'none';
+    li.style.padding = '6px 0';
+    li.textContent = `${c.name} — ${c.tier || 'Sem selo'}${c.owner ? ' — Resp.: ' + c.owner : ''}`;
+    ul.appendChild(li);
+  });
+  box.appendChild(ul);
+}
+
+// Escuta a coleção 'clients' (tempo real)
+onSnapshot(collection(db, 'clients'), (snap) => {
+  const all = [];
+  const names = [];
+  snap.forEach(d => {
+    const data = d.data() || {};
+    const name = (data.name || '').trim();
+    if (!name) return;
+    all.push({
+      id: d.id,
+      name,
+      tier: data.tier || '',
+      owner: data.owner || '',
+    });
+    names.push(name);
+  });
+  // ordena por nome
+  all.sort((a,b)=> a.name.localeCompare(b.name, 'pt-BR', { sensitivity: 'base' }));
+  names.sort((a,b)=> a.localeCompare(b, 'pt-BR', { sensitivity: 'base' }));
+
+  clientsFull = all;
+  clients = names;
+
+  // popular selects relacionados a cliente:
+  populateSelect('new-task-client', clients, false);
+  populateSelect('filter-client', clients, true, 'Todos'); // se tiver filtro
+
+  // também redesenha a lista de clientes (aba Clientes):
+  renderClientsTable();
+});
+
+// Escuta a coleção 'owners' (responsáveis)
+onSnapshot(collection(db, 'owners'), (snap) => {
+  const names = [];
+  snap.forEach(d => {
+    const data = d.data() || {};
+    if (data && data.name) names.push(data.name);
+  });
+  names.sort((a,b)=> a.localeCompare(b, 'pt-BR', { sensitivity: 'base' }));
+  owners = names;
+
+  // popular selects relacionados a responsável:
+  populateSelect('new-task-owner', owners, false);
+  populateSelect('filter-owner', owners, true, 'Todos');
+  populateSelect('clients-resp', owners, true, '–'); // se você tiver um select de responsável na aba Clientes
+});
+
 ;
           const oDoc=await getDoc(doc(db,'settings','owners')); if(oDoc.exists()) owners=oDoc.data().names||[]; else await setDoc(doc(db,'settings','owners'), { names:['Ana Silva']});
           populateSelect('new-task-client', clients, false, 'Selecione...'); populateSelect('filter-client', clients, false, 'Todos'); renderSettingsClients();
@@ -1233,21 +1356,39 @@ function addDacoraLogoToPdf(doc) {
 
   document.addEventListener('DOMContentLoaded', function(){
 
-    /* 2) Validações leves de formulário de Tarefa (criar/editar) */
-    var addForm = $('add-task-form');
-    onSafe(addForm, 'submit', function(e){
-      try{
-        var f = addForm;
-        var client = f['new-task-client'] || f.querySelector('[name="new-task-client"]');
-        var desc   = f['new-task-description']   || f.querySelector('[name="new-task-description"]');
-        var date   = f['new-task-date']   || f.querySelector('[name="new-task-date"]');
-        var hours  = f['new-task-hours']  || f.querySelector('[name="new-task-hours"]');
-        if(!client || isEmpty(client.value)){ e.preventDefault(); toast('Selecione o Cliente.'); return false; }
-        if(!desc   || isEmpty(desc.value)){   e.preventDefault(); toast('Descreva a tarefa.'); return false; }
-        if(!date   || isEmpty(date.value)){   e.preventDefault(); toast('Informe a data de início.'); return false; }
-        if(hours && isNaN(parseFloat(hours.value))){ e.preventDefault(); toast('Horas inválidas. Use números (ex.: 1.5).'); return false; }
-      }catch(err){ console.warn(err); }
-    });
+    // ===================== CRIAÇÃO DE TAREFA (Nova forma) =====================
+(function wireAddTaskForm(){
+  const form = document.getElementById('add-task-form');
+  if(!form) return;
+
+  form.addEventListener('submit', async (e)=>{
+    e.preventDefault();
+    try {
+      const client = form['new-task-client'].value.trim();
+      const desc   = form['new-task-description'].value.trim();
+      const date   = form['new-task-date'].value;
+      const hours  = form['new-task-hours'].value.trim();
+
+      if(!client){ toast('Selecione o Cliente.'); return; }
+      if(!desc){   toast('Descreva a tarefa.'); return; }
+      if(!date){   toast('Informe a data de início.'); return; }
+      if(hours && isNaN(parseFloat(hours))){ toast('Horas inválidas. Use números (ex.: 1.5).'); return; }
+
+      await addDoc(collection(db,'tasks'),{
+        client, desc, date,
+        hours: hours? parseFloat(hours) : 0,
+        status: 'iniciada',
+        createdAt: new Date()
+      });
+
+      toast('Tarefa adicionada com sucesso!');
+      form.reset();
+    } catch(err){
+      console.error(err);
+      toast('Erro ao salvar tarefa');
+    }
+  });
+})();
 
     var editForm = $('edit-task-form');
     onSafe(editForm, 'submit', function(e){
